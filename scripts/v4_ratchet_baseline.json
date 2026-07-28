@@ -169,7 +169,7 @@
       "v4_rule_document_shape": 1
     },
     "scripts/v4_ratchet_baseline.json": {
-      "GovernancePolicy": 6,
+      "GovernancePolicy": 7,
       "PolicyDocument": 9,
       "v4_policy_document_file": 1
     }
