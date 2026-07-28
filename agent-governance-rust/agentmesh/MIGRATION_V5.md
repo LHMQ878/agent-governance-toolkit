@@ -55,3 +55,30 @@ silently seeing no matches. Read `decision` and the emitted `events` instead.
 It previously panicked on a `FrameworkHostConfig` outside the valid range. It
 now returns `RuntimeError::ManifestInvalid`. `new` is unchanged and stays
 infallible, because the default config is valid by construction.
+
+## A manifest must bind every point the adapter evaluates
+
+The runtime denies an intervention point the manifest does not declare
+(`runtime_error:intervention_point_unknown` becomes a `Deny`). Failing closed is
+the right default, but it makes a minimal first manifest look broken: the
+adapter evaluates `input` on every `execute()` and `pre_tool_call` on every tool
+call, so a manifest binding only one of them denies everything on the other path
+with no obvious cause.
+
+Bind both:
+
+```yaml
+intervention_points:
+  input:
+    policy_target: $.input.body
+    policy:
+      id: your_policy
+  pre_tool_call:
+    policy_target: $.tool_call.args
+    tool_name_from: $.tool_call.name
+    policy:
+      id: your_policy
+```
+
+If a deny appears with `intervention_point_unknown` in the reason, the manifest
+is missing the point rather than the policy rejecting the request.
