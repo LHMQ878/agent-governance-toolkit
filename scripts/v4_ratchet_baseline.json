@@ -1,5 +1,5 @@
 {
-  "grand_total": 1181,
+  "grand_total": 1180,
   "package_totals": {
     "BREAKING_CHANGES.md": 1,
     "CHANGELOG.md": 2,
@@ -25,7 +25,6 @@
     "docs/specs": 75,
     "docs/tutorials": 295,
     "docs/workshop": 8,
-    "examples/adk-governed": 1,
     "examples/aegis-governance-profile": 4,
     "examples/atr-community-rules": 29,
     "examples/atr-import": 8,
@@ -546,9 +545,6 @@
     },
     "docs/workshop/prerequisites.md": {
       "PolicyEvaluator": 2
-    },
-    "examples/adk-governed/README.md": {
-      "governance.yaml": 1
     },
     "examples/aegis-governance-profile/README.md": {
       "CedarBackend": 3,

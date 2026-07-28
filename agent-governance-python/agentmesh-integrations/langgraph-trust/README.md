@@ -16,7 +16,11 @@ runtime = AgtRuntime("policies/manifest.yaml")
 kernel = LangGraphKernel(runtime=runtime)
 ```
 
-This package no longer creates or interprets inline policy objects.
+Policy for the graph itself comes from the ACS manifest above.
+
+`PolicyCheckpoint` still interprets the package's own `GraphTrustRules`
+(`blocked_tools`, `blocked_patterns`, `max_tokens`) for checkpoint-level trust
+decisions. That type was renamed as part of this change; it was not removed.
 
 See the
 [package consolidation migration guide](../../../docs/package-consolidation/MIGRATION.md).
