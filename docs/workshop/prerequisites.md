@@ -101,12 +101,13 @@ Run this script to confirm everything is working:
 
 ```bash
 python -c "
-from agent_control_specification import validate_manifest
-m = the ACS manifest.model_validate({
-    'agent_control_specification_version': '0.3.1-beta',
-    'metadata': {'name': 'workshop-check'},
-})
-print('Manifest:', m.metadata['name'])
+from agent_control_specification import parse_manifest
+m = parse_manifest('''
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: workshop-check
+''')
+print('Manifest:', m['metadata']['name'])
 
 from agentmesh import AgentIdentity, RiskScorer
 a = AgentIdentity.create(name='TestAgent', sponsor='you@example.com', capabilities=[])
