@@ -225,6 +225,13 @@ evaluation is side-effect free.
 
 ### Policy YAML syntax
 
+!!! note "This page documents the .NET engine's own policy format"
+
+    The Python, Rust, and TypeScript runtimes evaluate ACS v5 manifests. The
+    .NET `PolicyEngine` still uses the `governance.toolkit/v1` document shown
+    below, and this page will change when that engine migrates. Do not use
+    this shape with the other runtimes.
+
 ```yaml
 apiVersion: governance.toolkit/v1
 name: production-security
