@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import math
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Awaitable
@@ -75,6 +76,30 @@ def run_sync(coro: Awaitable[Any], *, timeout: float | None = None) -> Any:
     if "error" in outcome:
         raise outcome["error"]
     return outcome.get("value")
+
+DEFAULT_APPROVAL_TIMEOUT_SECONDS = 300.0
+"""Bound on the approval wait when neither caller nor manifest sets one.
+
+An unbounded wait is a fail-open: CPython cannot interrupt a resolver blocked
+in synchronous code, so a hung approval would hold the calling agent forever
+instead of denying.
+"""
+
+
+def _resolve_approval_timeout(control: Any, explicit: float | None) -> float:
+    """Pick the approval timeout: caller, then manifest, then the default."""
+    if explicit is not None:
+        return explicit
+    manifest = getattr(control, "manifest", None)
+    if isinstance(manifest, Mapping):
+        approval = manifest.get("approval")
+        if isinstance(approval, Mapping):
+            declared = approval.get("timeout_seconds")
+            if isinstance(declared, (int, float)) and not isinstance(declared, bool):
+                if declared > 0:
+                    return float(declared)
+    return DEFAULT_APPROVAL_TIMEOUT_SECONDS
+
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -238,7 +263,9 @@ class HostSession:
     ) -> None:
         self._control = control
         self._mode = EnforcementMode(mode)
-        self._approval_timeout_seconds = approval_timeout_seconds
+        self._approval_timeout_seconds = _resolve_approval_timeout(
+            control, approval_timeout_seconds
+        )
         self._approval_on_timeout = approval_on_timeout
         self.builder = builder or SnapshotBuilder(
             agent_id=agent_id, session_id=session_id

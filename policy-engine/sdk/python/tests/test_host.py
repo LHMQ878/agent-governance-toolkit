@@ -9,6 +9,7 @@ import asyncio
 import pytest
 
 from agent_control_specification import (
+    DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     AgentControlBlocked,
     AgentControlSuspended,
     Decision,
@@ -269,3 +270,44 @@ def test_escalation_is_not_resolved_in_evaluate_only_mode() -> None:
 
     assert result.verdict.decision is Decision.ESCALATE
     assert control.enforced == []
+
+
+class _ManifestControl(_EscalatingControl):
+    def __init__(self, manifest, on_enforce=None) -> None:
+        super().__init__(on_enforce)
+        self.manifest = manifest
+
+
+def test_approval_wait_is_bounded_by_default() -> None:
+    """With nothing configured the wait is bounded, not infinite.
+
+    An unbounded join cannot be interrupted, so a hung resolver would hold the
+    agent forever instead of denying.
+    """
+    session = HostSession(_EscalatingControl())
+
+    assert session._approval_timeout_seconds == DEFAULT_APPROVAL_TIMEOUT_SECONDS
+
+
+def test_manifest_approval_timeout_is_honoured() -> None:
+    """A manifest that declares approval.timeout_seconds drives the wait."""
+    control = _ManifestControl({"approval": {"timeout_seconds": 12}})
+
+    assert HostSession(control)._approval_timeout_seconds == 12.0
+
+
+def test_explicit_timeout_beats_the_manifest() -> None:
+    """An explicit argument still wins over the manifest value."""
+    control = _ManifestControl({"approval": {"timeout_seconds": 12}})
+
+    assert HostSession(control, approval_timeout_seconds=3)._approval_timeout_seconds == 3
+
+
+def test_unusable_manifest_timeout_falls_back_to_the_default() -> None:
+    """A zero, negative, or non-numeric declaration cannot disable the bound."""
+    for declared in (0, -5, "soon", True, None):
+        control = _ManifestControl({"approval": {"timeout_seconds": declared}})
+        assert (
+            HostSession(control)._approval_timeout_seconds
+            == DEFAULT_APPROVAL_TIMEOUT_SECONDS
+        )

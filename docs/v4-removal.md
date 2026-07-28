@@ -91,13 +91,14 @@ normative specs.
 
 ## Phase 1 native contracts
 
-`AgentControl.from_path(str(...))` is the canonical runtime constructor. It
-accepts a path, YAML text, a mapping, or `the ACS manifest`. Paths carry their parent
-directory as provenance. Other inputs must provide `base_dir` when they contain
-relative bundle, data, prompt, Cedar, or `extends` references. The runtime never
-falls back to the current working directory.
+`AgentControl.from_path(str(...))` is the canonical runtime constructor and
+takes a filesystem path. A path carries its parent directory as provenance, so
+relative bundle, data, prompt, Cedar, and `extends` references resolve against
+the manifest rather than the current working directory. For a manifest already
+in memory use `AgentControl.from_native`; `from_url` and `from_manifest_chain`
+cover the remote and layered cases.
 
-`the ACS manifest` is a lossless typed representation of AGT-MANIFEST-1.0. It
+The parsed manifest is a lossless representation of AGT-MANIFEST-1.0. It
 performs structural validation and preserves policy, tool, annotator, resolver,
 and host extension fields. It does not accept intent-level fields such as
 `max_tokens`, `allowed_tools`, or `blocked_patterns`, and it never synthesizes
@@ -109,9 +110,10 @@ The model preserves the AGT `limits` section, but runtime construction rejects
 it until the Python SDK can enforce those values. Silently accepting an
 unenforced security limit is not allowed.
 
-`AgentControl.evaluate(...)` returns the native immutable `PolicyEvaluation`.
-The stable fields are `verdict`, `reason_code`, `message`,
-`intervention_point`, `transform`, `evidence`, `result_labels`,
+`AgentControl.evaluate_intervention_point(...)` returns an immutable
+`InterventionPointResult`. Its `verdict` carries `decision`, `reason`,
+`message`, `transform`, `evidence`, and `result_labels`; the result itself
+carries `transformed_policy_target`, `transformed_policy_target_applied`,
 `input_identity`, and `enforced_identity`. Its audit envelope uses schema
 `agt.policy_evaluation.v1`. ACS does not currently expose `policy_id` or
 `rule_id` on `InterventionPointResult`, so neither field appears in this
@@ -128,7 +130,7 @@ moves adapters to the native result. Phase 6 removes the compatibility surface.
 
 | Concern | Native contract |
 |---------|-----------------|
-| Required intervention points | Every adapter declares them and calls `the ACS manifest.validate_for(...)` before execution. A missing required point is a construction error, never a runtime allow fallback. |
+| Required intervention points | Every adapter declares them and the runtime contract is checked before execution. A missing required point is a construction error, never a runtime allow fallback. |
 | Tool catalog | `manifest` requires static `tools`, `host_dynamic` is synchronized by the host, and `optional` imposes no catalog requirement. |
 | Transform | Each adapter declares the intervention points where it can apply a transform. The shared adapter session applies it before forwarding the payload. |
 | Approval | `AgentControl` owns the resolver and timeout behavior. An adapter given a runtime cannot also accept competing resolver configuration. |
@@ -180,8 +182,8 @@ The one-way `GovernancePolicy` translator lives under `agt.cli` and has no
 runtime import path. It accepts exact literal fields and exact
 `PatternType.SUBSTRING`, `PatternType.REGEX`, and `PatternType.GLOB` forms.
 Dynamic expressions, host-only settings, invalid patterns, unsupported fields,
-and existing outputs refuse migration. The generated manifest is validated as
-`the ACS manifest` before an atomic write. Differential tests compare every
+and existing outputs refuse migration. The generated manifest is validated with
+`validate_manifest` before an atomic write. Differential tests compare every
 supported construct with the frozen runtime bridge so defaults and boundary
 semantics cannot drift during the transition. REGEX and GLOB use OPA's Go RE2
 validator, and GLOB uses the RE2 `\z` end anchor rather than Python's unsupported

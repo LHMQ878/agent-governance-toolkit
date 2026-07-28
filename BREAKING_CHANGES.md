@@ -5,6 +5,59 @@ entries appear first.
 
 ---
 
+## `agt.policies` is removed; hosts call the ACS runtime directly
+
+**Date:** TBD
+
+**Affected**
+
+- anything importing `agt.policies`
+- hosts relying on the wrapper's approval-timeout default
+- audit records keyed on the `policy:` reason-code prefix
+
+**What changed**
+
+`agt.policies` wrapped the ACS runtime to re-expose it under AGT names. The
+wrapper is deleted and every module now calls
+`agent_control_specification` directly. The `agt` package keeps only the CLI,
+including the v4 migration tool.
+
+The following public symbols are removed:
+
+- runtime and manifest: `AgtRuntime`, `AgtManifest`, `AdapterRuntimeSession`,
+  `AdapterManifestContract`, `ManifestCompatibilityError`, `ManifestProvenance`
+- results: `PolicyEvaluation`, `ApprovalDecision`, `PolicyAuditRecord`,
+  `TransformResult`, `EvidenceResult`
+- snapshot builders: `SnapshotBuilder`, `agent_startup_snapshot`,
+  `agent_shutdown_snapshot`, `input_snapshot`, `output_snapshot`,
+  `pre_model_call_snapshot`, `post_model_call_snapshot`,
+  `pre_tool_call_snapshot`, `post_tool_call_snapshot`
+
+**Replacements**
+
+| Removed | Use instead |
+|---------|-------------|
+| `AgtRuntime(path)` | `AgentControl.from_path(str(path))` |
+| `AdapterRuntimeSession` | `HostSession` |
+| `AgtManifest` | `parse_manifest` / `validate_manifest` |
+| `PolicyEvaluation` | `InterventionPointResult` and `Verdict` |
+| `ApprovalDecision` | `ApprovalResolution` |
+| `*_snapshot()` helpers | `SnapshotBuilder` from `agent_control_specification` |
+| `evaluation.is_allowed()` | `result.verdict.decision.permits` |
+
+**Three deliberate behaviour changes**
+
+1. Reason codes lose the `policy:` prefix. A Pydantic validator on the wrapper
+   added it; the engine never emitted it. Anything matching on `policy:` needs
+   updating.
+2. `agt validate` now applies the runtime's own contract, so a manifest with no
+   intervention points is an error rather than a warning.
+3. The approval timeout moved onto the session. `HostSession` defaults to 300
+   seconds and denies on expiry, and honours `approval.timeout_seconds` from
+   the manifest when the caller does not pass one.
+
+---
+
 ## acs-generator is now a CLI-only package
 
 **Date:** TBD (next `acs-generator` release)
@@ -73,7 +126,7 @@ The following public symbols are removed:
   `document_to_governance`, `policy_document_to_shared`,
   `shared_to_policy_document`, `to_policy_action`
 - `agent_os.integrations`: `GovernancePolicy`, `AsyncGovernedWrapper`
-- `agent_control_specification`: `EvaluationResult`
+- `agt.policies`: `EvaluationResult`
 - `agt.manifest_resolution` (the whole module, along with `agt._harness.opa_runner`):
   `resolve_manifest`, `discover_policies`, `merge_documents`, `filter_by_scope`,
   `ResolutionError`, `ResolutionReason`
