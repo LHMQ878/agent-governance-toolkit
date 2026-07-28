@@ -116,6 +116,9 @@
     "agent-governance-python/agt-policies/tests/test_migration_boundary.py": {
       "import:agt.manifest_resolution": 1
     },
+    "docs/tutorials/19-dotnet-sdk.md": {
+      "PolicyAction": 6
+    },
     "docs/v4-removal.md": {
       "AdapterRuntimeBridge": 1,
       "CedarBackend": 1,
@@ -143,8 +146,8 @@
       "resolution_root": 2
     },
     "scripts/v4_ratchet_baseline.json": {
-      "GovernancePolicy": 32,
-      "PolicyDocument": 40,
+      "GovernancePolicy": 6,
+      "PolicyDocument": 9,
       "v4_policy_document_file": 1
     }
   },

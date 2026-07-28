@@ -268,12 +268,12 @@ rules:
 
 | Action | Enum Value | `Allowed` | Behaviour |
 |--------|-----------|-----------|-----------|
-| `allow` | `PolicyEvaluation.Allow` | `true` | Permit the request |
-| `deny` | `PolicyEvaluation.Deny` | `false` | Block the request |
-| `warn` | `PolicyEvaluation.Warn` | `true` | Permit but flag for review |
-| `log` | `PolicyEvaluation.Log` | `true` | Permit and log for audit |
-| `require_approval` | `PolicyEvaluation.RequireApproval` | `false` | Block pending human approval |
-| `rate_limit` | `PolicyEvaluation.RateLimit` | varies | Enforce sliding window limits |
+| `allow` | `PolicyAction.Allow` | `true` | Permit the request |
+| `deny` | `PolicyAction.Deny` | `false` | Block the request |
+| `warn` | `PolicyAction.Warn` | `true` | Permit but flag for review |
+| `log` | `PolicyAction.Log` | `true` | Permit and log for audit |
+| `require_approval` | `PolicyAction.RequireApproval` | `false` | Block pending human approval |
+| `rate_limit` | `PolicyAction.RateLimit` | varies | Enforce sliding window limits |
 
 ### Condition expressions
 
