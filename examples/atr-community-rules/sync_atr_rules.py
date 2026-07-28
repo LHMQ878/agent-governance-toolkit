@@ -74,6 +74,15 @@ def _extract_regex_patterns(detection: dict[str, Any]) -> list[str]:
 
 
 def _validate_regex(pattern: str, source: str, *, strict: bool) -> bool:
+    if "`" in pattern:
+        # Defence in depth. Patterns are emitted as JSON-quoted Rego strings,
+        # which neutralises a backtick, but a corpus pattern has no business
+        # carrying one and the sync runs unattended against a third-party feed.
+        message = f"Regex from {source} contains a backtick"
+        if strict:
+            raise InvalidRegexError(message)
+        print(f"WARNING: {message}", file=sys.stderr)
+        return False
     if len(pattern.encode("utf-8")) > 8 * 1024:
         message = f"Regex from {source} exceeds 8192 bytes"
         if strict:
@@ -165,7 +174,7 @@ def compile_patterns(
             [
                 f"matches contains {json.dumps(candidate)} if {{",
                 f"\ttarget := sprintf(\"%v\", [object.get(body, {json.dumps(item.field)}, \"\")])",
-                f"\tregex.match(`{item.pattern}`, target)",
+                f"\tregex.match({json.dumps(item.pattern)}, target)",
                 "}",
                 "",
             ]
