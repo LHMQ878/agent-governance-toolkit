@@ -9,7 +9,10 @@ import asyncio
 import pytest
 
 from agent_control_specification import (
+    AgentControlBlocked,
+    AgentControlSuspended,
     Decision,
+    InterventionPoint,
     HostSession,
     InterventionPointResult,
     SnapshotBuilder,
@@ -172,3 +175,97 @@ def test_run_sync_returns_the_awaited_value() -> None:
         return "value"
 
     assert run_sync(coro()) == "value"
+
+
+_ESCALATED = InterventionPointResult(
+    verdict=Verdict(decision=Decision.ESCALATE, reason="needs-approval")
+)
+
+
+class _EscalatingControl:
+    """Returns an escalate verdict, then fails ``enforce`` as configured.
+
+    ``enforce`` is where the session resolves an escalation, so each test
+    picks the outcome by giving this control the exception the real approval
+    path would raise.
+    """
+
+    def __init__(self, on_enforce: BaseException | None = None) -> None:
+        self.on_enforce = on_enforce
+        self.enforced: list[object] = []
+
+    async def evaluate_intervention_point(self, intervention_point, snapshot, mode):
+        return InterventionPointResult(
+            verdict=Verdict(decision=Decision.ESCALATE, reason="needs-approval")
+        )
+
+    async def enforce(self, intervention_point, result, mode):
+        self.enforced.append(intervention_point)
+        if self.on_enforce is not None:
+            raise self.on_enforce
+        return result
+
+
+def _escalating_session(exc: BaseException | None = None, **kwargs) -> HostSession:
+    return HostSession(_EscalatingControl(exc), **kwargs)
+
+
+def test_escalation_approved_becomes_allow_keeping_its_reason() -> None:
+    """An approval that returns cleanly folds the escalation into an allow."""
+    result = _escalating_session().input("proceed")
+
+    assert result.verdict.decision is Decision.ALLOW
+    assert result.verdict.reason == "needs-approval"
+
+
+def test_escalation_blocked_becomes_deny() -> None:
+    """A refused approval folds into a deny the caller can act on."""
+    result = _escalating_session(AgentControlBlocked(InterventionPoint.INPUT, _ESCALATED)).input("x")
+
+    assert result.verdict.decision is Decision.DENY
+    assert result.verdict.reason == "approval_denied"
+
+
+def test_escalation_suspended_stays_escalated_for_later_resume() -> None:
+    """A suspended approval is left escalated so the host can resume it."""
+    result = _escalating_session(AgentControlSuspended(InterventionPoint.INPUT, _ESCALATED)).input("x")
+
+    assert result.verdict.decision is Decision.ESCALATE
+    assert result.verdict.reason == "needs-approval"
+
+
+def test_escalation_with_a_broken_resolver_fails_closed() -> None:
+    """A resolver that raises anything else denies rather than permitting."""
+    result = _escalating_session(RuntimeError("resolver exploded")).input("x")
+
+    assert result.verdict.decision is Decision.DENY
+    assert result.verdict.reason == "approval_failed"
+
+
+def test_escalation_timeout_denies_by_default() -> None:
+    """A timed-out approval denies unless the host opted into allowing."""
+    result = _escalating_session(TimeoutError()).input("x")
+
+    assert result.verdict.decision is Decision.DENY
+    assert result.verdict.reason == "runtime_error:approval_timeout"
+
+
+def test_escalation_timeout_allows_only_when_configured() -> None:
+    """approval_on_timeout='allow' is the one path a timeout may permit."""
+    session = _escalating_session(TimeoutError(), approval_on_timeout="allow")
+
+    result = session.input("x")
+
+    assert result.verdict.decision is Decision.ALLOW
+    assert result.verdict.reason == "approval_timeout"
+
+
+def test_escalation_is_not_resolved_in_evaluate_only_mode() -> None:
+    """evaluate_only reports the escalation instead of running approval."""
+    control = _EscalatingControl()
+    session = HostSession(control, mode="evaluate_only")
+
+    result = session.input("x")
+
+    assert result.verdict.decision is Decision.ESCALATE
+    assert control.enforced == []
