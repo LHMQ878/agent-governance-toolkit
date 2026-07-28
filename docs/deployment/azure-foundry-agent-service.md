@@ -37,11 +37,11 @@ Azure AI Foundry Agent Service uses the Microsoft Agent Framework (MAF) under th
 │  │  ┌──────────────────────┐                          │  │
 │  │  │ AgentControlMW   │ ← Policy enforcement     │  │
 │  │  ├──────────────────────┤                          │  │
-│  │  │ CapabilityGuardMW    │ ← Tool allow/deny lists  │  │
+│  │  │ CapabilityGuardMiddleware    │ ← Tool allow/deny lists  │  │
 │  │  ├──────────────────────┤                          │  │
-│  │  │ AuditTrailMW         │ ← Tamper-proof logging   │  │
+│  │  │ AuditTrailMiddleware         │ ← Tamper-proof logging   │  │
 │  │  ├──────────────────────┤                          │  │
-│  │  │ RogueDetectionMW     │ ← Behavioral anomaly     │  │
+│  │  │ RogueDetectionMiddleware     │ ← Behavioral anomaly     │  │
 │  │  └──────────────────────┘                          │  │
 │  │       │                                            │  │
 │  │       ▼                                            │  │
