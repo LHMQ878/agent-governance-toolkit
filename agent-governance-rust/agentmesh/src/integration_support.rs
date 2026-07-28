@@ -10,6 +10,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Instant;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -194,7 +195,6 @@ pub struct FrameworkExecutionResult {
     pub decision: ExecutionResponse,
     pub requires_human_approval: bool,
     pub effective_payload: Option<String>,
-    pub matched_patterns: Vec<String>,
     pub events: Vec<GovernanceEvent>,
 }
 
@@ -212,22 +212,58 @@ pub struct FrameworkGovernanceAdapter<H: GovernanceHook> {
     host_config: FrameworkHostConfig,
     event_log: Mutex<VecDeque<GovernanceEvent>>,
     tool_call_count: Mutex<usize>,
+    /// Usage the host reports via [`FrameworkGovernanceAdapter::record_usage`].
+    /// The adapter never sees model responses, so a host that wants manifest
+    /// budget rules on tokens or cost to fire has to feed these in.
+    token_count: Mutex<u64>,
+    cost_usd: Mutex<f64>,
+    started_at: Instant,
 }
 
 impl<H: GovernanceHook> FrameworkGovernanceAdapter<H> {
     pub fn new(framework: FrameworkKind, hook: H, control: AgentControl) -> Self {
-        Self::with_host_config(framework, hook, control, FrameworkHostConfig::default())
+        // The default config is valid by construction (0.15 is inside 0.0..=1.0
+        // and 5 is non-zero), so this path cannot fail and stays infallible.
+        Self::from_validated_config(framework, hook, control, FrameworkHostConfig::default())
     }
 
+    /// Build an adapter from a caller-supplied host config.
+    ///
+    /// Returns [`RuntimeError::ManifestInvalid`] when the config is out of
+    /// range rather than panicking, so a host can surface the error.
     pub fn with_host_config(
         framework: FrameworkKind,
         hook: H,
         control: AgentControl,
         host_config: FrameworkHostConfig,
+    ) -> Result<Self, RuntimeError> {
+        Ok(Self::from_validated_config(
+            framework,
+            hook,
+            control,
+            host_config.validate()?,
+        ))
+    }
+
+    /// Record model usage so manifest budget rules can see it.
+    ///
+    /// The adapter mediates requests but never observes model responses, so
+    /// token and cost budgets stay at zero unless the host reports usage here
+    /// after each model call. Elapsed time is tracked from construction.
+    pub fn record_usage(&self, tokens: u64, cost_usd: f64) {
+        *self
+            .token_count
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) += tokens;
+        *self.cost_usd.lock().unwrap_or_else(|e| e.into_inner()) += cost_usd;
+    }
+
+    fn from_validated_config(
+        framework: FrameworkKind,
+        hook: H,
+        control: AgentControl,
+        host_config: FrameworkHostConfig,
     ) -> Self {
-        let host_config = host_config
-            .validate()
-            .expect("FrameworkHostConfig must be validated before adapter construction");
         Self {
             framework,
             middleware: GovernanceMiddleware::new(hook),
@@ -235,6 +271,9 @@ impl<H: GovernanceHook> FrameworkGovernanceAdapter<H> {
             host_config,
             event_log: Mutex::new(VecDeque::new()),
             tool_call_count: Mutex::new(0),
+            token_count: Mutex::new(0),
+            cost_usd: Mutex::new(0.0),
+            started_at: Instant::now(),
         }
     }
 
@@ -297,6 +336,9 @@ impl<H: GovernanceHook> FrameworkGovernanceAdapter<H> {
             .tool_call_count
             .lock()
             .unwrap_or_else(|e| e.into_inner());
+        let token_count = *self.token_count.lock().unwrap_or_else(|e| e.into_inner());
+        let cost_usd = *self.cost_usd.lock().unwrap_or_else(|e| e.into_inner());
+        let elapsed_seconds = self.started_at.elapsed().as_secs_f64();
         let mut events = vec![self.emit_event(
             GovernanceEventType::PolicyCheck,
             &request.actor,
@@ -313,9 +355,9 @@ impl<H: GovernanceHook> FrameworkGovernanceAdapter<H> {
                         "intervention_point": "pre_tool_call",
                         "budgets": {
                             "tool_call_count": tool_call_count,
-                            "token_count": 0,
-                            "elapsed_seconds": 0,
-                            "cost_usd": 0
+                            "token_count": token_count,
+                            "elapsed_seconds": elapsed_seconds,
+                            "cost_usd": cost_usd
                         }
                     },
                     "tool_call": {
@@ -334,9 +376,9 @@ impl<H: GovernanceHook> FrameworkGovernanceAdapter<H> {
                         "intervention_point": "input",
                         "budgets": {
                             "tool_call_count": tool_call_count,
-                            "token_count": 0,
-                            "elapsed_seconds": 0,
-                            "cost_usd": 0
+                            "token_count": token_count,
+                            "elapsed_seconds": elapsed_seconds,
+                            "cost_usd": cost_usd
                         }
                     },
                     "input": {
@@ -376,7 +418,6 @@ impl<H: GovernanceHook> FrameworkGovernanceAdapter<H> {
                 },
                 requires_human_approval,
                 effective_payload: None,
-                matched_patterns: Vec::new(),
                 events,
             };
         }
@@ -403,7 +444,6 @@ impl<H: GovernanceHook> FrameworkGovernanceAdapter<H> {
             decision: hook_decision,
             requires_human_approval: false,
             effective_payload,
-            matched_patterns: Vec::new(),
             events,
         }
     }
@@ -1357,6 +1397,26 @@ mod tests {
         }
     }
 
+    /// Captures the snapshot each evaluation receives so tests can assert on
+    /// the budget block the adapter sends to the runtime.
+    #[derive(Clone, Default)]
+    struct CapturingPolicy {
+        seen: Arc<Mutex<Vec<serde_json::Value>>>,
+    }
+
+    impl PolicyDispatcher for CapturingPolicy {
+        fn evaluate(
+            &self,
+            invocation: &PreparedPolicyInvocation,
+        ) -> Result<serde_json::Value, RuntimeError> {
+            self.seen
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(serde_json::to_value(invocation).unwrap_or_default());
+            Ok(serde_json::json!({"decision": "allow", "reason": null}))
+        }
+    }
+
     struct StaticPolicy {
         decision: &'static str,
         reason: Option<&'static str>,
@@ -1416,6 +1476,28 @@ tools:
             })),
         )
         .unwrap()
+    }
+
+    fn capturing_control(policy: CapturingPolicy) -> AgentControl {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+agent_control_specification_version: 0.3.1-beta
+policies:
+  integration:
+    type: custom
+    adapter: integration_test
+intervention_points:
+  input:
+    policy_target: $.input.body
+    policy:
+      id: integration
+tools:
+  read_file:
+    clearance: public
+"#,
+        )
+        .unwrap();
+        AgentControl::from_manifest_with_dispatchers(manifest, None, Some(Arc::new(policy))).unwrap()
     }
 
     fn transform_control(value: &'static str) -> AgentControl {
@@ -1550,7 +1632,8 @@ blocked_patterns: [password]
             DemoHook,
             control("allow", None),
             host_config,
-        );
+        )
+        .expect("valid host config");
         let assessment = adapter.assess_response(
             "agent",
             "respond",
@@ -1809,5 +1892,39 @@ blocked_patterns: [password]
         let drift = DriftResult::compare("same text here", "same text here", 0.1);
         assert!(!drift.exceeded);
         assert!(drift.score.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn recorded_usage_reaches_the_budget_block_the_runtime_sees() {
+        let policy = CapturingPolicy::default();
+        let adapter = FrameworkGovernanceAdapter::new(
+            FrameworkKind::Tower,
+            DemoHook,
+            capturing_control(policy.clone()),
+        );
+
+        adapter.record_usage(1200, 0.25);
+        adapter.record_usage(34, 0.05);
+
+        let _ = adapter.evaluate_request(
+            ExecutionRequest {
+                actor: "agent".into(),
+                action: "data.read".into(),
+                payload: Some("hello".into()),
+            },
+            None,
+            None,
+        );
+
+        let seen = policy.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let text = serde_json::to_string(&*seen).unwrap();
+        assert!(
+            text.contains("1234"),
+            "accumulated token_count missing from snapshot: {text}"
+        );
+        assert!(
+            !text.contains("\"token_count\":0"),
+            "token_count still hard-coded to zero: {text}"
+        );
     }
 }
